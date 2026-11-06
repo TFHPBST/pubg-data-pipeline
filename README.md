@@ -1,6 +1,20 @@
-# pubg-data-study
+# pubg-data-pipeline
 
-데이터 엔지니어링 학습 저장소입니다. PUBG 공개 API로 매치 데이터를 수집하고 검증한 뒤 분석용 파일로 저장하는 파이프라인을 Python으로 구현합니다.
+PUBG 공개 API에서 매치와 텔레메트리를 수집해 PostgreSQL에 적재하고, 파일과 DB의 행 수를 검증한 뒤 이상 플레이 후보를 분석하는 파이프라인입니다. 매일 자동으로 실행되며 테스트와 코드 검사는 GitHub Actions에서 돌아갑니다.
+
+| 항목 | 값 (2026-11-06 기준) |
+|---|---|
+| 수집한 매치 | 136 |
+| 사람 플레이어 | 11,709명 |
+| 킬 기록 | 12,808건 |
+| 원본 데이터 | 약 5.2 GB |
+| 전체 재처리 시간 | 41.4초 |
+| 테스트 | 55개 (DB 테스트 7개 포함) |
+
+- 분석 결과: [docs/analysis_report.md](docs/analysis_report.md)
+- 데이터 규모 기록: [docs/metrics.md](docs/metrics.md)
+
+통계적으로 튀는 값은 부정행위의 증거가 아니라 **검토할 후보**로만 다룹니다. 실제 플레이어는 가명(`p_` + 해시 8자리)으로만 표시합니다.
 
 ## 구조
 
@@ -34,8 +48,6 @@ flowchart LR
 
 - `collect.py`: PUBG 매치 수집: API → raw 캐시 → 파싱 → processed 저장
 - `utils.py`: 데이터 검증 함수 모음 (헤드샷 비율 계산, 참가자와 매치 구조 검증, 손상된 JSON 파일 안전 로드)
-- `day09.py` ~ `day14.py`: Python 학습을 위한 코드 연습 파일
-- `make_*.py`: day09.py ~ day14.py까지 학습을 위한 가상의 데이터 생성용 파일
 
 ## 실행 방법
 
@@ -86,7 +98,7 @@ python checks/check_keys.py
 pytest
 ```
 
-GitHub에 push하거나 PR을 만들면 GitHub Actions에서 같은 테스트가 자동으로 실행됩니다. 테스트에는 API 키와 DB가 필요 없습니다.
+GitHub에 push하거나 PR을 만들면 GitHub Actions에서 같은 테스트가 자동으로 실행됩니다. API 키 없이 실행됩니다. DB 테스트 7개는 `TEST_DATABASE_URL`(이름이 `_test`로 끝나는 DB)이 설정된 경우에만 실행되고, CI에서는 PostgreSQL 16 서비스로 항상 실행됩니다.
 
 ## 데이터
 
