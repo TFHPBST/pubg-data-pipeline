@@ -123,6 +123,7 @@ def test_candidates_partial_result_is_reported(monkeypatch, tmp_path, capsys):
     assert len(players) == 1
     assert "2명 중 1명" in capsys.readouterr().out
 
+
 def test_timeout_then_404_stops(monkeypatch):
     calls, sleeps = use_fake_server(
         monkeypatch,
