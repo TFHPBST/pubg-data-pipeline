@@ -15,7 +15,7 @@ def test_battle_royale_official_is_supported(mode):
     check_supported(match(mode))  # 예외가 나지 않으면 통과
 
 
-@pytest.mark.parametrize("mode", ["tdm", "zulu-fpp", "normal-squad", "clansolo"])
+@pytest.mark.parametrize("mode", ["tdm", "zulu-fpp", "normal-squad", "clansolo", "esports-squad", "normal-solo-fpp"])
 def test_unsupported_mode_is_skipped(mode):
     with pytest.raises(SkippedMatch, match=mode):
         check_supported(match(mode))
