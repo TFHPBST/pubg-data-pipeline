@@ -221,7 +221,6 @@ def parse_kills(telemetry_data, match_id):
                 }
             )
             continue
-        killer_acc = t["killer"]["accountId"]
         killer_info = t["killerDamageInfo"]
         weapon = killer_info["damageCauserName"]
         raw_distance = killer_info["distance"]
