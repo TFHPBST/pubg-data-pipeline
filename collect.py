@@ -269,8 +269,6 @@ def process_match(match_id):
     check_supported(data)
     game_mode = data["data"]["attributes"]["gameMode"]
     rows = parse_participants(data)
-    # 저장
-    save_jsonl(path=f"processed/participants_{match_id}.jsonl", rows=rows)
     # 텔레메트리 주소 찾기
     telemetry_url = find_telemetry_url(data)
     # 텔레메트리 받기
@@ -278,6 +276,7 @@ def process_match(match_id):
     # 킬 추출
     success, excluded = parse_kills(telemetry_data=telemetry_data, match_id=match_id)
     # 저장
+    save_jsonl(path=f"processed/participants_{match_id}.jsonl", rows=rows)
     save_jsonl(path=f"processed/kills_{match_id}.jsonl", rows=success)
     save_json(path=f"processed/excluded_kills_{match_id}.json", data=excluded)
     # 요약 딕셔너리
@@ -326,12 +325,7 @@ def run_collect(player_name, limit):
     player = fetch_player(player_name)
     match_refs = player["data"][0]["relationships"]["matches"]["data"]
     match_ids = [m["id"] for m in match_refs[:limit]]
-    (
-        succeeded,
-        skipped,
-        failed,
-    ) = run_batch(match_ids)
-    return succeeded, skipped, failed
+    return run_batch(match_ids)
 
 
 def run_reprocess():
