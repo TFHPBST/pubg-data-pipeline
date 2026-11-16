@@ -122,9 +122,4 @@ def run_load():
 
 
 if __name__ == "__main__":
-    with psycopg.connect(get_conninfo()) as conn:
-        with conn.cursor() as cur:
-            n_matches = load_matches(cur)
-            n_participants = load_participants(cur)
-            n_kills = load_kills(cur)
-    print({"matches": n_matches, "participants": n_participants, "kills": n_kills})
+    print(run_load())
