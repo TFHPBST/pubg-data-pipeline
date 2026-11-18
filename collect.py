@@ -353,6 +353,9 @@ def fetch_players_by_ids(account_ids):
 
 
 def run_collect_candidates(account_ids, limit):
+    if not account_ids:
+        print("후보가 없어 수집할 매치가 없습니다")
+        return run_batch([])
     players = fetch_players_by_ids(account_ids)
     match_ids = []
     for p in players:
