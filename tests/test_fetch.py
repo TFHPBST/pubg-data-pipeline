@@ -136,3 +136,21 @@ def test_timeout_then_404_stops(monkeypatch):
         fetch_with_retry("u")
     assert len(calls) == 2
     assert sleeps == [1]
+
+
+def test_no_candidates_does_not_call_api(monkeypatch, tmp_path):
+    # 45일차: 후보가 0명이면 API를 부르지 않고 빈 결과로 끝나야 함
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PUBG_API_KEY", "dummy")
+    calls = []
+
+    def fake_fetch(url, headers=None, params=None):
+        calls.append(params)
+        return {"data": []}
+
+    monkeypatch.setattr(collect, "fetch_with_retry", fake_fetch)
+
+    succeeded, failed, skipped = collect.run_collect_candidates([], limit=3)
+
+    assert (succeeded, failed, skipped) == ([], [], [])
+    assert calls == []
