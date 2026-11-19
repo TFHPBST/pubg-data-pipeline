@@ -6,6 +6,7 @@ import pytest
 
 from collect import save_json, save_jsonl
 from load import load_kills, load_matches, load_participants
+from player_queue import seed_queue
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
 
@@ -22,7 +23,7 @@ def db():
             raise RuntimeError(f"테스트 DB가 아닙니다: {conn.info.dbname}")
 
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS kills, participants, matches CASCADE")
+            cur.execute("DROP TABLE IF EXISTS kills, participants, matches, player_queue CASCADE")
             cur.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
         yield conn
@@ -163,3 +164,49 @@ def test_null_distance_is_allowed(db, monkeypatch, tmp_path):
     write_sample(kills=[kill(distance=None)])
     load_all(db)
     assert counts(db) == (1, 3, 1)
+
+
+def queue_rows(conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT account_id, status FROM player_queue ORDER BY account_id")
+        return cur.fetchall()
+
+
+def test_seed_queue_adds_humans_only(db, monkeypatch, tmp_path):
+    # 46일차: AI 참가자는 대기열에 들어가지 않음
+    monkeypatch.chdir(tmp_path)
+    write_sample()  # 참가자: account.k1, account.v1, ai.1
+    load_all(db)
+    with db.cursor() as cur:
+        added = seed_queue(cur)
+    db.commit()
+    assert added == 2
+    assert queue_rows(db) == [("account.k1", "pending"), ("account.v1", "pending")]
+
+
+def test_seed_queue_twice_adds_nothing(db, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    write_sample()
+    load_all(db)
+    with db.cursor() as cur:
+        seed_queue(cur)
+        second = seed_queue(cur)
+    db.commit()
+    assert second == 0
+
+
+def test_seed_queue_keeps_collected_players(db, monkeypatch, tmp_path):
+    # 37일차 Q1: 다시 채워도 이미 수집한 플레이어의 기록이 지워지면 안 됨 (DO NOTHING)
+    monkeypatch.chdir(tmp_path)
+    write_sample()
+    load_all(db)
+    with db.cursor() as cur:
+        seed_queue(cur)
+        cur.execute(
+            "UPDATE player_queue SET status = 'done', last_collected_at = now() WHERE account_id = 'account.k1'"
+        )
+        seed_queue(cur)
+        cur.execute("SELECT status, last_collected_at IS NOT NULL FROM player_queue WHERE account_id = 'account.k1'")
+        row = cur.fetchone()
+    db.commit()
+    assert row == ("done", True)

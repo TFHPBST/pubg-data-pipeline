@@ -44,3 +44,14 @@ CREATE TABLE IF NOT EXISTS kills (
     FOREIGN KEY (match_id, killer) REFERENCES participants (match_id, account_id),
     FOREIGN KEY (match_id, victim) REFERENCES participants (match_id, account_id)
 );
+
+-- 수집할 플레이어 대기열 (46일차)
+CREATE TABLE IF NOT EXISTS player_queue (
+    account_id         TEXT PRIMARY KEY CHECK (account_id LIKE 'account.%'),
+    status             TEXT NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending', 'done', 'failed')),
+    added_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_collected_at  TIMESTAMPTZ,
+    attempts           INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    last_error         TEXT
+);
