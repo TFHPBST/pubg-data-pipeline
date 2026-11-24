@@ -17,6 +17,21 @@ def seed_queue(cur):
     return cur.rowcount
 
 
+def next_batch(cur, n=10):
+    """다음에 수집할 플레이어의 account_id를 최대 n명 돌려준다."""
+    cur.execute(
+        """
+        SELECT account_id
+        FROM player_queue
+        WHERE NOT (status = 'failed' AND attempts >= 3)
+        ORDER BY last_collected_at NULLS FIRST, account_id
+        LIMIT %s
+        """,
+        (n,),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 if __name__ == "__main__":
     with psycopg.connect(get_conninfo()) as conn:
         with conn.cursor() as cur:
