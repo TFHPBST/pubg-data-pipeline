@@ -32,6 +32,31 @@ def next_batch(cur, n=10):
     return [row[0] for row in cur.fetchall()]
 
 
+def mark_done(cur, account_ids):
+    """수집에 성공한 플레이어들을 done으로 바꾸고, 바뀐 행 수를 돌려준다."""
+    cur.execute(
+        """
+        UPDATE player_queue
+        SET status = 'done', last_collected_at = NOW(), attempts = 0, last_error = NULL
+        WHERE account_id = ANY(%s)
+        """,
+        (account_ids,),
+    )
+    return cur.rowcount
+
+
+def mark_failed(cur, account_id, error):
+    """수집에 실패한 플레이어의 시도 횟수를 늘리고 오류를 기록한다."""
+    cur.execute(
+        """
+        UPDATE player_queue
+        SET status = 'failed', attempts = attempts + 1, last_error = %s
+        WHERE account_id = %s
+        """,
+        (error, account_id),
+    )
+
+
 if __name__ == "__main__":
     with psycopg.connect(get_conninfo()) as conn:
         with conn.cursor() as cur:
