@@ -6,7 +6,7 @@ import pytest
 
 from collect import save_json, save_jsonl
 from load import load_kills, load_matches, load_participants
-from player_queue import seed_queue
+from player_queue import mark_done, mark_failed, next_batch, seed_queue
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
 
@@ -210,3 +210,71 @@ def test_seed_queue_keeps_collected_players(db, monkeypatch, tmp_path):
         row = cur.fetchone()
     db.commit()
     assert row == ("done", True)
+
+
+def add_queue(conn, rows):
+    # (account_id, status, last_collected_at, attempts)를 대기열에 직접 넣는 도우미
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO player_queue (account_id, status, last_collected_at, attempts) VALUES (%s, %s, %s, %s)",
+            rows,
+        )
+    conn.commit()
+
+
+QUEUE_SAMPLE = [
+    ("account.a", "pending", None, 0),
+    ("account.b", "done", "2026-11-10T00:00:00Z", 0),
+    ("account.c", "done", "2026-11-01T00:00:00Z", 0),
+    ("account.d", "failed", None, 3),
+    ("account.e", "failed", None, 1),
+]
+
+
+def test_next_batch_order(db):
+    # 47일차: 수집 안 한 사람 먼저, 그다음 오래전에 수집한 사람, 3번 실패한 사람은 제외
+    add_queue(db, QUEUE_SAMPLE)
+    with db.cursor() as cur:
+        assert next_batch(cur, n=10) == ["account.a", "account.e", "account.c", "account.b"]
+
+
+def test_next_batch_limit(db):
+    add_queue(db, QUEUE_SAMPLE)
+    with db.cursor() as cur:
+        assert next_batch(cur, n=2) == ["account.a", "account.e"]
+
+
+def test_next_batch_empty_queue(db):
+    with db.cursor() as cur:
+        assert next_batch(cur) == []
+
+
+def test_mark_done_updates_state(db):
+    add_queue(db, QUEUE_SAMPLE)
+    with db.cursor() as cur:
+        changed = mark_done(cur, ["account.a", "account.e"])
+        cur.execute(
+            "SELECT account_id, status, last_collected_at IS NOT NULL, attempts, last_error "
+            "FROM player_queue WHERE account_id IN ('account.a', 'account.e') ORDER BY account_id"
+        )
+        rows = cur.fetchall()
+    db.commit()
+    assert changed == 2
+    assert rows == [("account.a", "done", True, 0, None), ("account.e", "done", True, 0, None)]
+
+
+def test_failed_three_times_is_excluded(db):
+    add_queue(db, [("account.x", "pending", None, 0)])
+    with db.cursor() as cur:
+        for _ in range(3):
+            mark_failed(cur, "account.x", "ApiError: 404")
+        assert next_batch(cur) == []
+        cur.execute("SELECT status, attempts, last_error FROM player_queue WHERE account_id = 'account.x'")
+        assert cur.fetchone() == ("failed", 3, "ApiError: 404")
+
+
+def test_done_player_moves_to_back(db):
+    add_queue(db, QUEUE_SAMPLE)
+    with db.cursor() as cur:
+        mark_done(cur, ["account.a"])
+        assert next_batch(cur) == ["account.e", "account.c", "account.b", "account.a"]
