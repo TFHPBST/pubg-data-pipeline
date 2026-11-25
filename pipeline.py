@@ -7,8 +7,11 @@ from pathlib import Path
 
 import psycopg
 
-from collect import count_lines, run_collect, run_collect_candidates, run_reprocess
+from collect import count_lines, get_headers, run_batch, run_collect, run_collect_candidates, run_reprocess
 from load import get_conninfo, run_load
+from player_queue import seed_queue
+from queue_collect import collect_from_queue
+from rate_limit import RateLimiter
 
 
 def parse_args(argv=None):
@@ -17,6 +20,9 @@ def parse_args(argv=None):
     parser.add_argument("--limit", type=int, default=3, help="처리할 최근 매치 수 (기본 3)")
     parser.add_argument("--reprocess", action="store_true", help="새로 수집하지 않고 raw에 있는 매치만 다시 처리")
     parser.add_argument("--candidates", metavar="FILE", help="후보 파일의 계정들의 최근 매치를 수집")
+    parser.add_argument(
+        "--queue-budget", type=int, default=0, help="대기열에서 players를 조회할 최대 호출 수 (기본 0 = 안 함)"
+    )
     args = parser.parse_args(argv)
 
     chosen = [bool(args.player_name), args.reprocess, bool(args.candidates)]
@@ -94,6 +100,23 @@ def collect_step(args, record):
     return run_collect(args.player_name, args.limit)
 
 
+def queue_step(budget, record):
+    if budget <= 0:
+        return [], [], []
+    get_headers()  # 키가 없으면 대기열을 건드리기 전에 여기서 바로 실패
+    with psycopg.connect(get_conninfo()) as conn:
+        with conn.cursor() as cur:
+            used, match_ids = collect_from_queue(cur, RateLimiter(), budget)  # (A)
+    record["queue"] = {"budget": budget, "calls": used, "matches": len(match_ids)}
+    return run_batch(match_ids)
+
+
+def seed_step():
+    with psycopg.connect(get_conninfo()) as conn:
+        with conn.cursor() as cur:
+            return seed_queue(cur)
+
+
 # Get-Content logs/pipeline_runs.jsonl -Tail 1 -Encoding UTF8
 # logs 폴더의 pipeline_runs.jsonl의 파일을 마지막 줄을 utf-8 인코딩 후 출력
 def main(argv=None):
@@ -105,13 +128,17 @@ def main(argv=None):
     }
     try:
         succeeded, failed, skipped = collect_step(args, record)
+        q_succeeded, q_failed, q_skipped = queue_step(args.queue_budget, record)  # 추가
+        succeeded += q_succeeded  # 추가
+        failed += q_failed  # (B)
+        skipped += q_skipped  # 추가
         record["collected"] = len(succeeded)
         record["failed"] = failed
         record["skipped"] = skipped
         print({"수집 성공": len(succeeded), "수집 실패": len(failed), "건너뜀": len(skipped)})
 
         record["loaded"] = run_load()
-
+        record["queue_added"] = seed_step()
         checks = verify(get_conninfo())
         record["verify"] = checks
         for table, c in checks.items():
