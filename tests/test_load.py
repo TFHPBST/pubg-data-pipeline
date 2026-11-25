@@ -4,9 +4,10 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from collect import save_json, save_jsonl
+from collect import RetryExhausted, save_json, save_jsonl
 from load import load_kills, load_matches, load_participants
 from player_queue import mark_done, mark_failed, next_batch, seed_queue
+from queue_collect import collect_from_queue
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
 
@@ -273,8 +274,90 @@ def test_failed_three_times_is_excluded(db):
         assert cur.fetchone() == ("failed", 3, "ApiError: 404")
 
 
-def test_done_player_moves_to_back(db):
+def test_done_player_excluded_for_a_day(db):
     add_queue(db, QUEUE_SAMPLE)
     with db.cursor() as cur:
         mark_done(cur, ["account.a"])
-        assert next_batch(cur) == ["account.e", "account.c", "account.b", "account.a"]
+        assert next_batch(cur) == ["account.e", "account.c", "account.b"]
+
+
+@pytest.fixture
+def cur(db):
+    with db.cursor() as c:
+        yield c
+
+
+class FakeLimiter:
+    def __init__(self):
+        self.waits = 0
+
+    def wait(self):
+        self.waits += 1
+
+
+def make_fetch(missing=(), error=None):
+    calls = []
+
+    def fetch(ids):
+        calls.append(list(ids))
+        if error is not None:
+            raise error
+        return [{"id": a, "relationships": {"matches": {"data": []}}} for a in ids if a not in missing]
+
+    return fetch, calls
+
+
+def add_pending(cur, n):
+    for i in range(n):
+        cur.execute("INSERT INTO player_queue (account_id) VALUES (%s)", (f"account.p{i:02d}",))
+
+
+def state_of(cur, account_id):
+    cur.execute("SELECT status, attempts FROM player_queue WHERE account_id = %s", (account_id,))
+    return cur.fetchone()
+
+
+def count_status(cur, status):
+    cur.execute("SELECT count(*) FROM player_queue WHERE status = %s", (status,))
+    return cur.fetchone()[0]
+
+
+def test_queue_collect_stops_at_budget(cur):
+    add_pending(cur, 30)
+    fetch, calls = make_fetch()
+    used, _ = collect_from_queue(cur, FakeLimiter(), budget=2, fetch=fetch)
+    assert used == 2  # (A)
+    assert count_status(cur, "done") == 20  # (B)
+
+
+def test_queue_collect_stops_when_queue_empty(cur):
+    add_pending(cur, 5)
+    fetch, calls = make_fetch()
+    limiter = FakeLimiter()
+    used, _ = collect_from_queue(cur, limiter, budget=10, fetch=fetch)
+    assert used == 1  # (C)
+    assert limiter.waits == used
+
+
+def test_queue_collect_marks_missing_as_failed(cur):
+    add_pending(cur, 10)
+    missing = {f"account.p{i:02d}" for i in range(3, 10)}
+    fetch, _ = make_fetch(missing=missing)
+    collect_from_queue(cur, FakeLimiter(), budget=1, fetch=fetch)
+    assert count_status(cur, "done") == 3
+    assert state_of(cur, "account.p05") == ("failed", 1)  # (D) (상태, attempts)
+
+
+def test_queue_collect_request_error_fails_whole_batch(cur):
+    add_pending(cur, 10)
+    fetch, _ = make_fetch(error=RetryExhausted("테스트"))
+    used, _ = collect_from_queue(cur, FakeLimiter(), budget=1, fetch=fetch)
+    assert used == 1
+    assert count_status(cur, "failed") == 10  # (E)
+
+
+def test_failed_player_not_retried_in_same_run(cur):
+    add_pending(cur, 20)
+    fetch, _ = make_fetch(missing={"account.p00"})
+    collect_from_queue(cur, FakeLimiter(), budget=2, fetch=fetch)
+    assert state_of(cur, "account.p00") == ("failed", 1)

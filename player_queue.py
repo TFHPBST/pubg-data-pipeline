@@ -24,6 +24,7 @@ def next_batch(cur, n=10):
         SELECT account_id
         FROM player_queue
         WHERE NOT (status = 'failed' AND attempts >= 3)
+        AND (last_collected_at IS NULL OR last_collected_at < now() - interval '1 day')
         ORDER BY last_collected_at NULLS FIRST, account_id
         LIMIT %s
         """,
@@ -50,7 +51,8 @@ def mark_failed(cur, account_id, error):
     cur.execute(
         """
         UPDATE player_queue
-        SET status = 'failed', attempts = attempts + 1, last_error = %s
+        SET status = 'failed', attempts = attempts + 1, last_error = %s,
+            last_collected_at = NOW()
         WHERE account_id = %s
         """,
         (error, account_id),

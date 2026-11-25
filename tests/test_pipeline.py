@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 import pipeline
+from pipeline import parse_args, queue_step
 
 OK_CHECKS = {t: {"file": 1, "db": 1, "ok": True} for t in ["matches", "participants", "kills"]}
 BAD_CHECKS = dict(OK_CHECKS, kills={"file": 1, "db": 2, "ok": False})
@@ -36,6 +37,7 @@ def use_fake_steps(monkeypatch, tmp_path, failed=(), checks=OK_CHECKS, load_erro
         return {"matches": 1, "participants": 1, "kills": 1}
 
     monkeypatch.setattr(pipeline, "run_load", fake_load)
+    monkeypatch.setattr("pipeline.seed_step", lambda: 0)
     monkeypatch.setattr(pipeline, "get_conninfo", lambda: "fake")
     monkeypatch.setattr(pipeline, "verify", lambda conninfo: checks)
 
@@ -97,3 +99,13 @@ def test_missing_arguments_exit_before_logging(monkeypatch, tmp_path):
         pipeline.main([])
     assert excinfo.value.code == 2
     assert not Path("logs/pipeline_runs.jsonl").exists()
+
+
+def test_queue_budget_defaults_to_zero():
+    assert parse_args(["someone"]).queue_budget == 0
+
+
+def test_queue_step_does_nothing_when_budget_zero():
+    record = {}
+    assert queue_step(0, record) == ([], [], [])
+    assert "queue" not in record
