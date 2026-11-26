@@ -64,9 +64,35 @@ def count_db_rows(conninfo):
     return counts
 
 
-def decide_status(failed, checks):
+QUALITY_SQL_PARTICIPANTS = """
+SELECT count(*) FILTER (WHERE NOT is_bot AND time_survived_s IS NULL),
+       count(*) FILTER (WHERE is_bot AND time_survived_s IS NOT NULL)
+FROM participants
+"""
+
+QUALITY_SQL_KILLS = """
+SELECT round(100.0 * count(*) FILTER (WHERE distance_m IS NULL) / NULLIF(count(*), 0), 2)
+FROM kills
+"""
+
+
+def quality_metrics(cur):
+    cur.execute(QUALITY_SQL_PARTICIPANTS)
+    human_null, bot_with = cur.fetchone()
+    cur.execute(QUALITY_SQL_KILLS)
+    pct = cur.fetchone()[0]
+    return {
+        "human_null_survival": human_null,
+        "bot_with_survival": bot_with,
+        "kills_null_distance_pct": None if pct is None else float(pct),
+    }
+
+
+def decide_status(failed, checks, quality=None):
     if not all(c["ok"] for c in checks.values()):
         return "verify_failed"
+    if quality and (quality["human_null_survival"] or quality["bot_with_survival"]):  # (C)
+        return "quality_failed"
     if failed:
         return "partial"
     return "ok"
@@ -117,6 +143,12 @@ def seed_step():
             return seed_queue(cur)
 
 
+def quality_step():
+    with psycopg.connect(get_conninfo()) as conn:
+        with conn.cursor() as cur:
+            return quality_metrics(cur)
+
+
 # Get-Content logs/pipeline_runs.jsonl -Tail 1 -Encoding UTF8
 # logs 폴더의 pipeline_runs.jsonl의 파일을 마지막 줄을 utf-8 인코딩 후 출력
 def main(argv=None):
@@ -145,7 +177,11 @@ def main(argv=None):
             mark = "OK" if c["ok"] else "불일치"
             print(f"{table}: 파일 {c['file']} / DB {c['db']} → {mark}")
 
-        record["status"] = decide_status(failed, checks)
+        quality = quality_step()  # 추가
+        record["quality"] = quality  # 추가
+        print(f"품질: {quality}")  # 추가
+
+        record["status"] = decide_status(failed, checks, quality)
     except Exception as err:
         record["status"] = "error"
         record["error"] = f"{type(err).__name__}: {err}"

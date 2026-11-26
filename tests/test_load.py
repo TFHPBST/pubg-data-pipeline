@@ -5,7 +5,8 @@ import psycopg
 import pytest
 
 from collect import RetryExhausted, save_json, save_jsonl
-from load import load_kills, load_matches, load_participants
+from load import apply_sql_files, load_kills, load_matches, load_participants
+from pipeline import quality_metrics
 from player_queue import mark_done, mark_failed, next_batch, seed_queue
 from queue_collect import collect_from_queue
 
@@ -361,3 +362,46 @@ def test_failed_player_not_retried_in_same_run(cur):
     fetch, _ = make_fetch(missing={"account.p00"})
     collect_from_queue(cur, FakeLimiter(), budget=2, fetch=fetch)
     assert state_of(cur, "account.p00") == ("failed", 1)
+
+
+def view_exists(cur, name):
+    cur.execute("SELECT count(*) FROM information_schema.views WHERE table_name = %s", (name,))
+    return cur.fetchone()[0] == 1
+
+
+def test_apply_sql_files_creates_view(cur):
+    assert view_exists(cur, "player_stats") is False  # (A) fixture는 schema.sql만 적용함
+    apply_sql_files(cur)
+    assert view_exists(cur, "player_stats") is True
+
+
+def test_apply_sql_files_twice_is_safe(cur):
+    apply_sql_files(cur)
+    assert apply_sql_files(cur) == 2  # (B)
+
+
+def test_apply_sql_files_on_empty_db(cur):
+    cur.execute("DROP TABLE IF EXISTS kills, participants, matches, player_queue CASCADE")
+    apply_sql_files(cur)
+    assert view_exists(cur, "player_stats") is True
+
+
+def test_quality_metrics_on_empty_db(cur):
+    assert quality_metrics(cur) == {
+        "human_null_survival": 0,
+        "bot_with_survival": 0,
+        "kills_null_distance_pct": None,  # (E) 사망 기록이 0건이면?
+    }
+
+
+def test_quality_metrics_counts_human_null_survival(cur):
+    cur.execute(
+        "INSERT INTO matches (match_id, game_mode, map_name, created_at) "
+        "VALUES ('m1', 'squad', 'Erangel', '2026-11-01T00:00:00Z')"
+    )
+    cur.execute(
+        "INSERT INTO participants (match_id, account_id, player_name, kills, headshot_kills, "
+        "damage_dealt, longest_kill_m, time_survived_s, win_place) "
+        "VALUES ('m1', 'account.a', 'someone', 0, 0, 0, 0, NULL, 1)"
+    )
+    assert quality_metrics(cur)["human_null_survival"] == 1

@@ -4,11 +4,14 @@ from pathlib import Path
 import pytest
 
 import pipeline
-from pipeline import parse_args, queue_step
+from pipeline import decide_status, parse_args, queue_step
 
 OK_CHECKS = {t: {"file": 1, "db": 1, "ok": True} for t in ["matches", "participants", "kills"]}
 BAD_CHECKS = dict(OK_CHECKS, kills={"file": 1, "db": 2, "ok": False})
 ONE_FAILURE = [{"match_id": "bad-1", "error": "RuntimeError: x"}]
+Q_OK_CHECKS = {"matches": {"ok": True}}
+Q_BAD_CHECKS = {"matches": {"ok": False}}
+BAD_QUALITY = {"human_null_survival": 2, "bot_with_survival": 0, "kills_null_distance_pct": 3.1}
 
 
 @pytest.mark.parametrize(
@@ -38,6 +41,10 @@ def use_fake_steps(monkeypatch, tmp_path, failed=(), checks=OK_CHECKS, load_erro
 
     monkeypatch.setattr(pipeline, "run_load", fake_load)
     monkeypatch.setattr("pipeline.seed_step", lambda: 0)
+    monkeypatch.setattr(
+        "pipeline.quality_step",
+        lambda: {"human_null_survival": 0, "bot_with_survival": 0, "kills_null_distance_pct": 0.0},
+    )
     monkeypatch.setattr(pipeline, "get_conninfo", lambda: "fake")
     monkeypatch.setattr(pipeline, "verify", lambda conninfo: checks)
 
@@ -109,3 +116,16 @@ def test_queue_step_does_nothing_when_budget_zero():
     record = {}
     assert queue_step(0, record) == ([], [], [])
     assert "queue" not in record
+
+
+def test_quality_problem_sets_status():
+    assert decide_status([], Q_OK_CHECKS, BAD_QUALITY) == "quality_failed"  # (D)
+
+
+def test_verify_failure_wins_over_quality():
+    assert decide_status([], Q_BAD_CHECKS, BAD_QUALITY) == "verify_failed"
+
+
+def test_both_quality_problems_set_status():
+    quality = {"human_null_survival": 1, "bot_with_survival": 1, "kills_null_distance_pct": 0.0}
+    assert decide_status([], Q_OK_CHECKS, quality) == "quality_failed"

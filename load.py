@@ -5,6 +5,15 @@ from pathlib import Path
 import psycopg
 from dotenv import load_dotenv
 
+BASE_DIR = Path(__file__).parent
+SQL_FILES = [BASE_DIR / "schema.sql", BASE_DIR / "analysis" / "player_stats.sql"]
+
+
+def apply_sql_files(cur, paths=SQL_FILES):
+    for path in paths:
+        cur.execute(path.read_text(encoding="utf-8"))
+    return len(paths)
+
 
 def get_conninfo():
     load_dotenv()
@@ -114,6 +123,7 @@ def load_kills(cur):
 def run_load():
     with psycopg.connect(get_conninfo()) as conn:
         with conn.cursor() as cur:
+            apply_sql_files(cur)
             n_matches = load_matches(cur)
             n_participants = load_participants(cur)
             n_kills = load_kills(cur)
