@@ -1,4 +1,5 @@
 # PUBG 매치 수집: API → raw 캐시 → 파싱 → processed 저장
+import gzip
 import json
 import os
 import sys
@@ -70,6 +71,26 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def save_json_atomic(path, data, compress=False):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    opener = gzip.open if compress else open
+    try:
+        with opener(tmp, "wt", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)  # (A) 무엇을 무엇으로?
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def read_json(path):
+    opener = gzip.open if str(path).endswith(".gz") else open  # (B)
+    with opener(path, "rt", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def fetch_with_retry(url, headers=None, params=None, max_retries=3):
     for attempt in range(max_retries + 1):
         wait = 2**attempt
@@ -105,13 +126,12 @@ def fetch_with_retry(url, headers=None, params=None, max_retries=3):
 # C1
 def load_or_fetch(path, url, needs_auth=False):
     if Path(path).exists():
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = read_json(path)
         print(f"캐시 사용: {path}")
         return data
     headers = get_headers() if needs_auth else None
     data = fetch_with_retry(url=url, headers=headers)
-    save_json(path, data)
+    save_json_atomic(path, data, compress=str(path).endswith(".gz"))  # (E)
     print(f"다운로드: {path}")
     return data
 
@@ -272,7 +292,7 @@ def process_match(match_id):
     # 텔레메트리 주소 찾기
     telemetry_url = find_telemetry_url(data)
     # 텔레메트리 받기
-    telemetry_data = load_or_fetch(path=f"raw/telemetry_{match_id}.json", url=telemetry_url)
+    telemetry_data = load_or_fetch(path=f"raw/telemetry_{match_id}.json.gz", url=telemetry_url)
     # 킬 추출
     success, excluded = parse_kills(telemetry_data=telemetry_data, match_id=match_id)
     # 저장
