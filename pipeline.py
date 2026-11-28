@@ -23,6 +23,12 @@ def parse_args(argv=None):
     parser.add_argument(
         "--queue-budget", type=int, default=0, help="대기열에서 players를 조회할 최대 호출 수 (기본 0 = 안 함)"
     )
+    parser.add_argument(
+        "--queue-match-limit",
+        type=int,
+        default=3,
+        help="대기열에서 수집한 플레이어 한 명당 가져올 최근 경기 수 (기본 3)",
+    )
     args = parser.parse_args(argv)
 
     chosen = [bool(args.player_name), args.reprocess, bool(args.candidates)]
@@ -126,14 +132,14 @@ def collect_step(args, record):
     return run_collect(args.player_name, args.limit)
 
 
-def queue_step(budget, record):
+def queue_step(budget, record, match_limit=3):
     if budget <= 0:
         return [], [], []
     get_headers()  # 키가 없으면 대기열을 건드리기 전에 여기서 바로 실패
     with psycopg.connect(get_conninfo()) as conn:
         with conn.cursor() as cur:
-            used, match_ids = collect_from_queue(cur, RateLimiter(), budget)  # (A)
-    record["queue"] = {"budget": budget, "calls": used, "matches": len(match_ids)}
+            used, match_ids = collect_from_queue(cur, RateLimiter(), budget, match_limit=match_limit)  # (A)
+    record["queue"] = {"budget": budget, "calls": used, "matches": len(match_ids), "match_limit": match_limit}
     return run_batch(match_ids)
 
 
@@ -160,7 +166,7 @@ def main(argv=None):
     }
     try:
         succeeded, failed, skipped = collect_step(args, record)
-        q_succeeded, q_failed, q_skipped = queue_step(args.queue_budget, record)  # 추가
+        q_succeeded, q_failed, q_skipped = queue_step(args.queue_budget, record, args.queue_match_limit)
         succeeded += q_succeeded  # 추가
         failed += q_failed  # (B)
         skipped += q_skipped  # 추가

@@ -129,3 +129,7 @@ def test_verify_failure_wins_over_quality():
 def test_both_quality_problems_set_status():
     quality = {"human_null_survival": 1, "bot_with_survival": 1, "kills_null_distance_pct": 0.0}
     assert decide_status([], Q_OK_CHECKS, quality) == "quality_failed"
+
+
+def test_queue_match_limit_defaults_to_three():
+    assert parse_args(["someone"]).queue_match_limit == 3

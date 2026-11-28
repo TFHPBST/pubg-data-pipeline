@@ -21,7 +21,7 @@ if errorlevel 1 (
     exit /b 3
 )
 
-"%PYTHON%" pipeline.py "%PUBG_PLAYER_NAME%" --limit 20 --queue-budget 5 >> "%OUT%" 2>&1
+"%PYTHON%" pipeline.py "%PUBG_PLAYER_NAME%" --limit 20 --queue-budget 1 --queue-match-limit 15 >> "%OUT%" 2>&1
 set CODE=%ERRORLEVEL%
 
 echo [END] exit code %CODE% >> "%OUT%"
